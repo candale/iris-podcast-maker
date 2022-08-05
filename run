@@ -1,0 +1,47 @@
+#!/bin/bash
+set -ex
+
+DEV_IMAGE_NAME=iris-podcast:dev
+
+build() {
+    docker build -t $DEV_IMAGE_NAME .
+}
+
+run() {
+    cmd=''
+    in_cmd=false
+    while [ $# -gt 0 ]; do
+        arg="$1"; shift
+        case $arg in
+            --)
+                in_cmd=true
+                ;;
+            *)
+                if [ "$in_cmd" = true ]; then
+                    cmd="$cmd $arg"
+                else
+                    echo "Unknown option $arg"
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+
+    docker run -it -v $(pwd)/src:/app/src $DEV_IMAGE_NAME  $cmd
+}
+
+command="$1"
+case $command in
+    build)
+        echo "Building development image"
+        build {@:1}
+        ;;
+    start)
+        run -- python do.py
+	;;
+    *)
+        echo "Running your command in container"
+        run ${@:1}
+        ;;
+esac
+
