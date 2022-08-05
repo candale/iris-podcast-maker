@@ -6,4 +6,4 @@ RUN pip install youtube-dl yt-dlp ffmpeg-python && \
 WORKDIR /app/src
 ADD ./src /app/src
 
-ENTRYPOINT ["/bin/bash"]
+CMD ["/bin/bash"]
