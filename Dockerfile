@@ -1,6 +1,6 @@
 FROM python:3.9
 
-RUN pip install youtube-dl yt-dlp ffmpeg-python && \
+RUN pip install youtube-dl yt-dlp ffmpeg-python pudb && \
     apt-get update -y && \
     apt-get install ffmpeg -y
 WORKDIR /app/src
