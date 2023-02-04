@@ -44,19 +44,26 @@ def with_cwd(path):
 
 @with_cwd(DATA_DIR)
 def download_descriptions():
+    def f(info, **kwargs):
+        '''!is_live & live_status!=is_upcoming & availability=public'''
+        if info.get('live_status') == 'is_upcoming':
+            return 'Is upcoming'
+
     ydl = yt_dlp.YoutubeDL(
         {
             "outtmpl": "%(id)s",
-            "max_downloads": 10,
+            "max_downloads": 100,
             "skip_download": True,
             "download_archive": "archive",
             "writedescription": True,
+            'noplaylist': True,
+            'match_filter': f,
         }
     )
 
     with ydl:
         try:
-            ydl.extract_info("https://www.youtube.com/user/bisericairis/videos")
+            ydl.extract_info("https://www.youtube.com/@bisericairis/streams")
         except MaxDownloadsReached:
             pass
 
@@ -79,7 +86,7 @@ def clean_descriptions(data_dir=DATA_DIR):
 
 
 def is_with_time(description):
-    return re.match(r"^(\d*\d:)*\d*\d:\d\d.*", description.strip())
+    return re.match(r"^(\d*\d:)*\d*\d:\d\d - (\d*\d:)*\d*\d:\d\d.*", description.strip())
 
 
 def is_sermon_time(description_line):
@@ -200,7 +207,9 @@ def run():
         if was_processed(video_id):
             continue
 
-        print("Description:", description)
+        # print("Description:", description)
+        if video_id == 'xIBDSr7Jz8c':
+            import pudb; pu.db
         try:
             video_times = extract_times(description)
         except MalformedDescription as e:
@@ -213,7 +222,7 @@ def run():
             make_podcast(file_path, video_times)
             mark_as_processed(video_id)
 
-    clean_descriptions()
+    # clean_descriptions()
 
 
 if __name__ == "__main__":

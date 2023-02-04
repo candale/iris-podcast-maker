@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -ex
 
 DEV_IMAGE_NAME=iris-podcast:dev
 
@@ -27,7 +27,7 @@ run() {
         esac
     done
 
-    docker run -it --user $UID:$GID -v $(pwd)/src:/app/src $DEV_IMAGE_NAME $cmd
+    docker run -it -v /.cache:$(pwd)/.cache -v $(pwd)/src:/app/src $DEV_IMAGE_NAME $cmd
 }
 
 command="$1"
