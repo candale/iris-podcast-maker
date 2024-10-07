@@ -190,8 +190,8 @@ def make_podcast(
         ffmpeg.run(output)
         final_inputs.append(ffmpeg.input(out_file_name))
 
-    final_inputs.insert(0, ffmpeg.input(str(media_dir / "intro.mp3")))
-    final_inputs.append(ffmpeg.input(str(media_dir / "outro.mp3")))
+    final_inputs.insert(0, ffmpeg.input(str(media_dir / "intro.v2.mp3")))
+    final_inputs.append(ffmpeg.input(str(media_dir / "outro.v2.mp3")))
     merged = ffmpeg.concat(*final_inputs, v=0, a=1).node
     audio = merged[1]
     output = ffmpeg.output(audio, str(podcasts_dir / f"{file_path.stem}.final.mp3"))
