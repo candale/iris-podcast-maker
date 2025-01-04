@@ -1,10 +1,13 @@
 import os
 import re
+from contextlib import ContextDecorator
 from pathlib import Path
-import logging
 from datetime import timedelta
 from textwrap import wrap
 from functools import wraps
+from pathlib import Path
+from loguru import logger
+import json
 
 import ffmpeg
 import yt_dlp
@@ -12,9 +15,9 @@ from yt_dlp.utils import MaxDownloadsReached
 
 
 ROOT = Path(__file__).parent
-DATA_DIR = ROOT / 'data_workdir'
-MEDIA_DIR = ROOT / 'media'
-PODCAST_DIR = ROOT / 'podcasts'
+DATA_DIR = ROOT / "data_workdir"
+MEDIA_DIR = ROOT / "media"
+PODCAST_DIR = ROOT / "podcasts"
 # We add 3 more seconds after the sermon so we have time to do a fadeout
 # to smoothly transition to the outro
 SERMON_FADE_OVERTIME = 3
@@ -25,29 +28,27 @@ class MalformedDescription(ValueError):
     pass
 
 
-def with_cwd(path):
-    def deco(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            initial_dir = os.getcwd()
-            os.chdir(path)
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                os.chdir(initial_dir)
+class with_cwd(ContextDecorator):
 
-            return result
+    def __init__(self, path, create_if_not_exists=False):
+        self.path = path
+        self.initial_dir = os.getcwd()
+        if os.path.exists(path) is False:
+            os.mkdir(path)
 
-        return wrapper
-    return deco
+    def __enter__(self):
+        os.chdir(self.path)
+
+    def __exit__(self, *exc):
+        os.chdir(self.initial_dir)
 
 
-@with_cwd(DATA_DIR)
+@with_cwd(DATA_DIR, create_if_not_exists=True)
 def download_descriptions():
-    def f(info, **kwargs):
-        '''!is_live & live_status!=is_upcoming & availability=public'''
-        if info.get('live_status') == 'is_upcoming':
-            return 'Is upcoming'
+    def filter_(info, **kwargs):
+        """!is_live & live_status!=is_upcoming & availability=public"""
+        if info.get("live_status") == "is_upcoming":
+            return "Is upcoming"
 
     ydl = yt_dlp.YoutubeDL(
         {
@@ -56,8 +57,8 @@ def download_descriptions():
             "skip_download": True,
             "download_archive": "archive",
             "writedescription": True,
-            'noplaylist': True,
-            'match_filter': f,
+            "noplaylist": True,
+            "match_filter": filter_,
         }
     )
 
@@ -80,13 +81,16 @@ def get_descriptions(data_dir=DATA_DIR):
 
 
 def clean_descriptions(data_dir=DATA_DIR):
-    for file_name in os.listdir(data_dir):
-        if file_name.endswith(".description"):
-            os.remove(DATA_DIR / file_name)
+    with with_cwd(data_dir, create_if_not_exists=True):
+        for file_name in os.listdir(data_dir):
+            if file_name.endswith(".description"):
+                os.remove(DATA_DIR / file_name)
 
 
 def is_with_time(description):
-    return re.match(r"^(\d*\d:)*\d*\d:\d\d - (\d*\d:)*\d*\d:\d\d.*", description.strip())
+    return re.match(
+        r"^(\d*\d:)*\d*\d:\d\d - (\d*\d:)*\d*\d:\d\d.*", description.strip()
+    )
 
 
 def is_sermon_time(description_line):
@@ -109,6 +113,10 @@ def get_timedelta_from_desc_interval(desc_time):
 
 
 def extract_times(description):
+    """
+    Extracts various timiing information from the video, like when the sermon
+    starts, when it ends etc
+    """
     lines_with_time = []
     for line in description.split("\n"):
         if is_with_time(line):
@@ -117,13 +125,25 @@ def extract_times(description):
     times = []
     for index, (line, is_sermon) in enumerate(lines_with_time):
         if is_sermon:
-            print('====== Found to be sermon')
+            print("====== Found to be sermon")
             # this will be: "35:30 - 1:29:14"
             begin_and_end = line.split(" Mesaj ")[0]
-            begin, end = begin_and_end.split('-')
+            begin, end = begin_and_end.split("-")
             begin = get_timedelta_from_desc_interval(begin.strip())
             end = get_timedelta_from_desc_interval(end.strip())
             times.append((begin, end))
+
+    return times
+
+
+def extract_times_from_local(video_id):
+    local_video_specs = json.loads(Path("local_video_specs.json").read_text())
+    times = []
+    if video_id in local_video_specs:
+        times = [
+            (timedelta(seconds=section["start"]), timedelta(seconds=section["end"]))
+            for section in local_video_specs[video_id]
+        ]
 
     return times
 
@@ -171,7 +191,7 @@ def make_podcast(
     times: list[tuple[timedelta, timedelta]],
     data_dir: Path = DATA_DIR,
     media_dir: Path = MEDIA_DIR,
-    podcasts_dir: Path = PODCAST_DIR
+    podcasts_dir: Path = PODCAST_DIR,
 ):
     file_path = Path(input_file)
     audio_input = ffmpeg.input(input_file)
@@ -180,10 +200,15 @@ def make_podcast(
         out_file_name = str(data_dir / f"{file_path.stem}.{index}.cut.mp3")
         print(f"=== Trimming from {begin.total_seconds()} to {end.total_seconds()}")
         trimmed = audio_input.filter_(
-            "atrim", start=begin.total_seconds(), end=end.total_seconds() + SERMON_FADE_OVERTIME
+            "atrim",
+            start=begin.total_seconds(),
+            end=end.total_seconds() + SERMON_FADE_OVERTIME,
         )
         trimmed_faded = trimmed.filter_(
-            'afade', type='out', start_time=end.total_seconds(), duration=SERMON_FADE_OVERTIME
+            "afade",
+            type="out",
+            start_time=end.total_seconds(),
+            duration=SERMON_FADE_OVERTIME,
         )
         output = ffmpeg.output(trimmed_faded, out_file_name)
 
@@ -207,20 +232,18 @@ def run():
         if was_processed(video_id):
             continue
 
-        # print("Description:", description)
-        if video_id == 'xIBDSr7Jz8c':
-            import pudb; pu.db
-        try:
-            video_times = extract_times(description)
-        except MalformedDescription as e:
-            logging.error(f"Failed for video [{video_id}]: {e}")
-            continue
+        print("Description:", description)
+        video_times = extract_times(description)
+        if not video_times:
+            extract_times_from_local(video_id)
 
         if video_times:
             file_name = download_video(video_id)
             file_path = str(DATA_DIR / file_name)
             make_podcast(file_path, video_times)
             mark_as_processed(video_id)
+        else:
+            logger.warning(f"No descriptions for video: {video_id}")
 
     # clean_descriptions()
 
