@@ -176,3 +176,10 @@ src/data_workdir
 # Cache dir
 
 .cache/
+
+# The actual podcasts
+
+src/podcasts
+
+# Mac stuff
+.Ds_store

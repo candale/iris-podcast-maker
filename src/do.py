@@ -3,8 +3,7 @@ import re
 from contextlib import ContextDecorator
 from pathlib import Path
 from datetime import timedelta
-from textwrap import wrap
-from functools import wraps
+from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 from loguru import logger
 import json
@@ -44,7 +43,7 @@ class with_cwd(ContextDecorator):
 
 
 @with_cwd(DATA_DIR, create_if_not_exists=True)
-def download_descriptions():
+def download_descriptions(target_video_id=None):
     def filter_(info, **kwargs):
         """!is_live & live_status!=is_upcoming & availability=public"""
         if info.get("live_status") == "is_upcoming":
@@ -59,19 +58,58 @@ def download_descriptions():
             "writedescription": True,
             "noplaylist": True,
             "match_filter": filter_,
+            "quiet": False,
+            "extract_flat": True,
+            "force_generic_extractor": False,
         }
     )
 
+    description = []
     with ydl:
-        try:
-            ydl.extract_info("https://www.youtube.com/@bisericairis/streams")
-        except MaxDownloadsReached:
-            pass
+        channel_info = ydl.extract_info(
+            "https://www.youtube.com/@bisericairis/streams", download=False
+        )
+        if "entries" in channel_info:
+            videos = channel_info["entries"]
+        else:
+            # Some channel URLs might need an extra level of extraction
+            playlist = channel_info["entries"][0]
+            videos = playlist["entries"]
+
+        description = []
+        for index, video in enumerate(videos):
+            # Extract full video info to get description
+            video_id = parse_qs(urlparse(video["url"]).query)["v"][0]
+
+            if target_video_id and target_video_id != video_id:
+                continue
+
+            logger.info(f"Getting info for video {video_id}, {index}/{len(videos)}")
+            if os.path.exists(os.path.join(DATA_DIR, f"{video_id}.spec.json")):
+                logger.info("Already processed, skipping")
+                continue
+
+            try:
+                video_info = ydl.extract_info(video["url"], download=False)
+            except yt_dlp.utils.DownloadError:
+                logger.exception(f'Failed to download video {video["url"]}')
+                continue
+
+            description = {
+                "video_id": video_id,
+                "title": video_info["title"],
+                "description": video_info["description"],
+                "upload_date": video_info["upload_date"],
+                "url": video["url"],
+            }
+
+            with open(os.path.join(DATA_DIR, f"{video_id}.spec.json"), "w") as f:
+                f.write(json.dumps(description, indent=4, sort_keys=True))
 
 
 def get_descriptions(data_dir=DATA_DIR):
     for file_name in os.listdir(data_dir):
-        if file_name.endswith(".description"):
+        if file_name.endswith(".spec.json"):
             with open(DATA_DIR / file_name, "r") as f:
                 content = f.read()
 
@@ -137,6 +175,9 @@ def extract_times(description):
 
 
 def extract_times_from_local(video_id):
+    if not os.path.exists("local_video_specs.json"):
+        return []
+
     local_video_specs = json.loads(Path("local_video_specs.json").read_text())
     times = []
     if video_id in local_video_specs:
@@ -154,6 +195,9 @@ def mark_as_processed(video_id):
 
 
 def was_processed(video_id):
+    if os.path.exists("already_processed") is False:
+        return False
+
     with open("already_processed", "r") as f:
         video_ids = [line.strip() for line in f]
         return video_id in video_ids
@@ -183,7 +227,7 @@ def download_video(id_):
         except MaxDownloadsReached:
             pass
 
-    return f"{id_}.mp3"
+    return f"{id_}.video.mp3"
 
 
 def make_podcast(
@@ -223,19 +267,22 @@ def make_podcast(
     ffmpeg.run(output)
 
 
-def run():
-    clean_descriptions()
-    download_descriptions()
+def run(target_video_id="Wgk5otvahNk"):
+    # clean_descriptions()
+    download_descriptions(target_video_id=target_video_id)
     descriptions = get_descriptions()
 
     for video_id, description in descriptions:
-        if was_processed(video_id):
+        should_skip = (
+            target_video_id and video_id != target_video_id or was_processed(video_id)
+        )
+        if should_skip:
             continue
 
         print("Description:", description)
         video_times = extract_times(description)
         if not video_times:
-            extract_times_from_local(video_id)
+            video_times = extract_times_from_local(video_id)
 
         if video_times:
             file_name = download_video(video_id)
