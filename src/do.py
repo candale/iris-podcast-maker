@@ -12,6 +12,9 @@ import ffmpeg
 import yt_dlp
 from yt_dlp.utils import MaxDownloadsReached
 
+import torch
+from transformers import pipeline
+
 
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data_workdir"
@@ -23,12 +26,10 @@ SERMON_FADE_OVERTIME = 3
 
 
 class MalformedDescription(ValueError):
-
     pass
 
 
 class with_cwd(ContextDecorator):
-
     def __init__(self, path, create_if_not_exists=False):
         self.path = path
         self.initial_dir = os.getcwd()
@@ -92,7 +93,7 @@ def download_descriptions(target_video_id=None):
             try:
                 video_info = ydl.extract_info(video["url"], download=False)
             except yt_dlp.utils.DownloadError:
-                logger.exception(f'Failed to download video {video["url"]}')
+                logger.exception(f"Failed to download video {video['url']}")
                 continue
 
             description = {
@@ -263,8 +264,31 @@ def make_podcast(
     final_inputs.append(ffmpeg.input(str(media_dir / "outro.v2.mp3")))
     merged = ffmpeg.concat(*final_inputs, v=0, a=1).node
     audio = merged[1]
-    output = ffmpeg.output(audio, str(podcasts_dir / f"{file_path.stem}.final.mp3"))
+    file_name = str(podcasts_dir / f"{file_path.stem}.final.mp3")
+    output = ffmpeg.output(audio, file_name)
     ffmpeg.run(output)
+
+    return file_name
+
+
+def transcribe(file_name):
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    pipe = pipeline(
+        "automatic-speech-recognition",
+        # model="gigant/whisper-medium-romanian",
+        # model="intelsense/whisper-m-romanian-ct2",
+        # model="readerbench/whisper-ro",
+        model="openai/whisper-medium",
+        chunk_length_s=30,
+        device=device,
+    )
+
+    prediction = pipe(file_name, batch_size=8, generate_kwargs={"language": "ro"})[
+        "text"
+    ]
+
+    return prediction
 
 
 def run(target_video_id="Wgk5otvahNk"):
@@ -287,7 +311,8 @@ def run(target_video_id="Wgk5otvahNk"):
         if video_times:
             file_name = download_video(video_id)
             file_path = str(DATA_DIR / file_name)
-            make_podcast(file_path, video_times)
+            file_name = make_podcast(file_path, video_times)
+            transcribe(file_name)
             mark_as_processed(video_id)
         else:
             logger.warning(f"No descriptions for video: {video_id}")

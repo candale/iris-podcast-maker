@@ -8,7 +8,8 @@ RUN pip install --upgrade pip poetry &&\
 
 WORKDIR /app
 ADD pyproject.toml poetry.lock /app/
-RUN --mount=type=cache,target=/root/.cache/pip poetry install --without dev
+ADD README.md /app/README.md
+RUN --mount=type=cache,target=/root/.cache/pip poetry install --without dev --no-root
 
 WORKDIR /app/src
 ADD ./src /app/src
